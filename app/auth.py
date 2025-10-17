@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -28,7 +29,12 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({
+        "exp": expire,
+        "iat": datetime.utcnow(),  # время создания
+        "jti": str(uuid.uuid4())  # уникальный идентификатор
+    })
+
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
@@ -60,13 +66,24 @@ async def get_current_user(
             settings.JWT_SECRET_KEY,
             algorithms=[settings.JWT_ALGORITHM]
         )
-        user_id: int = payload.get("sub")
+        user_id: str = payload.get("sub")
+        print(f"DEBUG: user_id from token: {user_id}, type: {type(user_id)}")  # Отладочный вывод
+
         if user_id is None:
             raise credentials_exception
-        # Уберите TokenData если его нет
-        user = db.query(User).filter(User.id == user_id).first()
+
+        try:
+            user_id_int = int(user_id)
+        except (ValueError, TypeError) as e:
+            print(f"DEBUG: Error converting user_id to int: {e}")  # Отладочный вывод
+            raise credentials_exception
+
+        user = db.query(User).filter(User.id == user_id_int).first()
+        print(f"DEBUG: Found user: {user}")  # Отладочный вывод
+
         if user is None:
             raise credentials_exception
         return user
-    except JWTError:
+    except JWTError as e:
+        print(f"DEBUG: JWTError: {e}")  # Отладочный вывод
         raise credentials_exception

@@ -55,10 +55,7 @@ def get_current_user(current_user: models.User = Depends(auth.get_current_user))
 
 
 @app.post("/logout")
-def logout(
-        credentials: auth.HTTPAuthorizationCredentials = Depends(auth.security),
-        current_user: models.User = Depends(auth.get_current_user)
-):
+def logout(credentials: auth.HTTPAuthorizationCredentials = Depends(auth.security)):
     # Добавляем токен в черный список
     blacklisted_tokens.add(credentials.credentials)
     return {"message": "Successfully logged out"}
@@ -67,6 +64,14 @@ def logout(
 # Middleware для проверки черного списка токенов
 @app.middleware("http")
 async def check_blacklisted_tokens(request, call_next):
+    # Пропускаем проверку для публичных endpoints
+    public_paths = ["/docs", "/redoc", "/openapi.json", "/login", "/register", "/logout"]
+
+    if request.url.path in public_paths:
+        response = await call_next(request)
+        return response
+
+    # Проверяем токены для защищенных endpoints (только /me)
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header.split(" ")[1]

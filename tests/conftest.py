@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 # ПЕРЕОПРЕДЕЛЯЕМ настройки для тестов
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app.main import app
+from app.main import app, blacklisted_tokens
 from app.database import get_db, Base
 from app.models import User
 
@@ -137,3 +137,29 @@ def mock_credentials():
         return mock_creds
 
     return _create_mock_credentials
+
+
+@pytest.fixture
+def expired_token_headers():
+    """Фикстура для заголовков с просроченным токеном"""
+    from datetime import datetime, timedelta
+    from jose import jwt
+    from app.config import settings
+
+    # Создаем просроченный токен
+    to_encode = {"sub": "123", "exp": datetime.utcnow() - timedelta(hours=1)}
+    expired_token = jwt.encode(
+        to_encode,
+        settings.JWT_SECRET_KEY,
+        algorithm=settings.JWT_ALGORITHM
+    )
+
+    return {"Authorization": f"Bearer {expired_token}"}
+
+
+@pytest.fixture(autouse=True)
+def clear_blacklist():
+    """Автоматически очищает черный список токенов перед каждым тестом"""
+    blacklisted_tokens.clear()
+    yield
+    blacklisted_tokens.clear()
