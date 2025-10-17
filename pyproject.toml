@@ -50,6 +50,40 @@ filterwarnings = [
     "ignore::UserWarning"
 ]
 
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+    "app/__init__.py",
+    "app/main.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    "print\\(",
+    "logger\\.",
+]
+show_missing = true
+skip_covered = false
+fail_under = 70
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "My Kuvar API Test Coverage"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
