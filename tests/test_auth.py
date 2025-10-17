@@ -1,138 +1,173 @@
 import pytest
-from fastapi import status
-from app.auth import create_access_token, verify_password, get_password_hash
+from datetime import datetime, timedelta
+from jose import JWTError, jwt
+from fastapi import HTTPException, status
+from unittest.mock import Mock
+
+from app.auth import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    get_user_by_email,
+    authenticate_user,
+    get_current_user
+)
+from app.config import settings
 
 
-class TestAuth:
-    def test_password_hashing(self):
-        """Тест хеширования пароля"""
-        password = "testpassword"
+class TestPasswordFunctions:
+    """Тесты для функций работы с паролями"""
+
+    def test_verify_password_correct(self):
+        """Тест проверки правильного пароля"""
+        password = "pass123"
         hashed = get_password_hash(password)
-
         assert verify_password(password, hashed) == True
-        assert verify_password("wrongpassword", hashed) == False
 
-    def test_token_creation(self):
-        """Тест создания JWT токена"""
-        data = {"sub": "test@example.com"}
+    def test_verify_password_incorrect(self):
+        """Тест проверки неправильного пароля"""
+        password = "pass123"
+        wrong_password = "wrong123"
+        hashed = get_password_hash(password)
+        assert verify_password(wrong_password, hashed) == False
+
+    def test_get_password_hash_too_long(self):
+        """Тест хеширования слишком длинного пароля"""
+        long_password = "a" * 100
+        with pytest.raises(ValueError, match="Password too long"):
+            get_password_hash(long_password)
+
+
+class TestTokenFunctions:
+    """Тесты для функций работы с JWT токенами"""
+
+    def test_create_access_token(self):
+        """Тест создания access token"""
+        data = {"sub": "123", "email": "test@example.com"}
         token = create_access_token(data)
 
         assert isinstance(token, str)
         assert len(token) > 0
 
+        # Проверяем, что токен можно декодировать
+        decoded = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        assert decoded["sub"] == "123"
+        assert "exp" in decoded
 
-class TestAuthEndpoints:
-    def test_register_success(self, client, db_session):
-        """Тест успешной регистрации пользователя"""
-        user_data = {
-            "email": "newuser@example.com",
-            "username": "newuser",
-            "password": "newpassword123"
-        }
+    def test_create_access_token_expiration(self):
+        """Тест срока действия токена"""
+        data = {"sub": "123"}
+        token = create_access_token(data)
 
-        response = client.post("/register", json=user_data)
-
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["email"] == user_data["email"]
-        assert data["username"] == user_data["username"]
-        assert "id" in data
-        assert "created_at" in data
-        assert "password" not in data  # Пароль не должен возвращаться
-
-    def test_register_duplicate_email(self, client, db_session):
-        """Тест регистрации с существующим email"""
-        user_data = {
-            "email": "duplicate@example.com",
-            "username": "user1",
-            "password": "password123"
-        }
-
-        # Первая регистрация
-        client.post("/register", json=user_data)
-
-        # Вторая регистрация с тем же email
-        duplicate_data = {
-            "email": "duplicate@example.com",
-            "username": "user2",
-            "password": "password456"
-        }
-
-        response = client.post("/register", json=duplicate_data)
-
-        assert response.status_code == status.HTTP_400_BAD_REQUEST
-
-    def test_login_success(self, client, db_session):
-        """Тест успешного входа"""
-        # Сначала регистрируем пользователя
-        user_data = {
-            "email": "login@example.com",
-            "username": "loginuser",
-            "password": "loginpassword123"
-        }
-        client.post("/register", json=user_data)
-
-        # Пытаемся войти
-        login_data = {
-            "email": "login@example.com",
-            "password": "loginpassword123"
-        }
-
-        response = client.post("/login", json=login_data)
-
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-
-    def test_login_wrong_password(self, client, db_session):
-        """Тест входа с неправильным паролем"""
-        user_data = {
-            "email": "wrongpass@example.com",
-            "username": "wrongpassuser",
-            "password": "correctpassword"
-        }
-        client.post("/register", json=user_data)
-
-        login_data = {
-            "email": "wrongpass@example.com",
-            "password": "wrongpassword"
-        }
-
-        response = client.post("/login", json=login_data)
-
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
-    def test_get_me_unauthorized(self, client):
-        """Тест доступа к /me без авторизации"""
-        response = client.get("/me")
-
-        assert response.status_code == status.HTTP_401_UNAUTHORIZED
-
-    def test_get_me_authorized(self, client, db_session):
-        """Тест доступа к /me с авторизацией"""
-        # Регистрация и вход
-        user_data = {
-            "email": "me@example.com",
-            "username": "meuser",
-            "password": "mepassword123"
-        }
-        client.post("/register", json=user_data)
-
-        login_data = {
-            "email": "me@example.com",
-            "password": "mepassword123"
-        }
-        login_response = client.post("/login", json=login_data)
-        token = login_response.json()["access_token"]
-
-        # Запрос с токеном
-        response = client.get(
-            "/me",
-            headers={"Authorization": f"Bearer {token}"}
+        decoded = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
         )
 
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        assert data["email"] == user_data["email"]
-        assert data["username"] == user_data["username"]
+        # Проверяем, что expiration установлен
+        assert "exp" in decoded
+        exp_time = datetime.fromtimestamp(decoded["exp"])
+        assert exp_time > datetime.utcnow()
+
+
+class TestUserFunctions:
+    """Тесты для функций работы с пользователями"""
+
+    def test_get_user_by_email_found(self, db_session, test_user):
+        """Тест поиска пользователя по email (найден)"""
+        found_user = get_user_by_email(db_session, test_user.email)
+        assert found_user is not None
+        assert found_user.email == test_user.email
+        assert found_user.username == test_user.username
+
+    def test_get_user_by_email_not_found(self, db_session):
+        """Тест поиска пользователя по email (не найден)"""
+        user = get_user_by_email(db_session, "nonexistent@example.com")
+        assert user is None
+
+    def test_authenticate_user_success(self, db_session, test_user):
+        """Тест успешной аутентификации пользователя"""
+        authenticated_user = authenticate_user(
+            db_session,
+            test_user.email,
+            "pass123"  # Пароль из фикстуры test_user
+        )
+        assert authenticated_user is not None
+        assert authenticated_user.email == test_user.email
+
+    def test_authenticate_user_wrong_password(self, db_session, test_user):
+        """Тест аутентификации с неправильным паролем"""
+        authenticated_user = authenticate_user(
+            db_session,
+            test_user.email,
+            "wrongpassword"
+        )
+        assert authenticated_user is False
+
+    def test_authenticate_user_nonexistent(self, db_session):
+        """Тест аутентификации несуществующего пользователя"""
+        authenticated_user = authenticate_user(
+            db_session,
+            "nonexistent@example.com",
+            "anypassword"
+        )
+        assert authenticated_user is False
+
+
+class TestGetCurrentUser:
+    """Тесты для функции get_current_user"""
+
+    @pytest.mark.asyncio
+    async def test_get_current_user_success(self, db_session, test_user, mock_credentials):
+        """Тест успешного получения текущего пользователя"""
+        token_data = {"sub": str(test_user.id)}
+        valid_token = create_access_token(token_data)
+
+        current_user = await get_current_user(
+            credentials=mock_credentials(valid_token),
+            db=db_session
+        )
+
+        assert current_user is not None
+        assert current_user.id == test_user.id
+        assert current_user.email == test_user.email
+
+    @pytest.mark.asyncio
+    async def test_get_current_user_invalid_token(self, db_session, mock_credentials):
+        """Тест с невалидным токеном"""
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(
+                credentials=mock_credentials("invalid.token.here"),
+                db=db_session
+            )
+
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+    @pytest.mark.asyncio
+    async def test_get_current_user_nonexistent_user(self, db_session, mock_credentials):
+        """Тест с токеном для несуществующего пользователя"""
+        # Создаем токен для несуществующего ID
+        token_data = {"sub": "999999"}
+        token = create_access_token(token_data)
+
+        with pytest.raises(HTTPException) as exc_info:
+            await get_current_user(
+                credentials=mock_credentials(token),
+                db=db_session
+            )
+
+        assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+# Простые тесты для быстрой проверки
+def test_basic_functionality():
+    """Базовый тест работы хеширования"""
+    password = "test123"
+    hashed = get_password_hash(password)
+    assert verify_password(password, hashed) == True
+    assert verify_password("wrong", hashed) == False

@@ -18,7 +18,10 @@ def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_password_hash(password):
+def get_password_hash(password: str) -> str:
+    """Хеширование пароля с проверкой длины для bcrypt"""
+    if len(password.encode('utf-8')) > 72:
+        raise ValueError("Password too long. Maximum length is 72 bytes.")
     return pwd_context.hash(password)
 
 
@@ -60,11 +63,10 @@ async def get_current_user(
         user_id: int = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-        token_data = TokenData(user_id=user_id)
+        # Уберите TokenData если его нет
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            raise credentials_exception
+        return user
     except JWTError:
         raise credentials_exception
-
-    user = db.query(User).filter(User.id == token_data.user_id).first()
-    if user is None:
-        raise credentials_exception
-    return user
